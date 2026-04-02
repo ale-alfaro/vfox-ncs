@@ -10,6 +10,13 @@ NCS_VERSION="${usage_ncs_version:?}"
 echo "WORKSPACE=${WORKSPACE} NCS_VERSION=$NCS_VERSION"
 pushd "${WORKSPACE}"
 APPDIR="${WORKSPACE?}/app"
+
+# cmsis was renamed to cmsis_6 in NCS ~3.2.0
+if printf '%s\n%s\n' "3.2.0" "${NCS_VERSION}" | sort -V | head -1 | grep -q "^3.2.0$"; then
+  CMSIS_MODULE="cmsis_6"
+else
+  CMSIS_MODULE="cmsis"
+fi
 cleanup() {
   echo "Cleanup!"
   rm -rf "$WORKSPACE"
@@ -45,7 +52,7 @@ manifest:
       import:
         name-allowlist:
           - zephyr
-          - cmsis_6
+          - ${CMSIS_MODULE}
           - hal_nordic
           - nrfxlib
 

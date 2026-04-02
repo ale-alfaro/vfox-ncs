@@ -7,6 +7,15 @@ local NRFUTIL_BASE_URL = ARTIFACTORY_BASE_URL .. "/swtools/external/nrfutil"
 local PACKAGE_INDEX_URL = NRFUTIL_BASE_URL .. "/index/init.json"
 local PACKAGE_INDEX_NAME = "nordic-external-production"
 
+--- Default toolchain directories per platform.
+--- macOS is fixed at /opt/nordic/ncs (Python/dyld requires deterministic path).
+--- Linux/Windows defaults can be overridden with --install-dir.
+local TOOLCHAIN_DIRS = {
+    darwin = "/opt/nordic/ncs",
+    linux = (os.getenv("HOME") or "") .. "/ncs",
+    windows = "C:\\ncs",
+}
+
 --- nrfutil executable download URLs keyed by platform
 ---@type table<string, string>
 local NRFUTIL_URLS = {
@@ -136,9 +145,23 @@ function M.search_versions()
     return versions
 end
 
---- Installs an NCS toolchain version into the given directory.
+--- Returns the effective toolchain base directory for the current platform.
+--- On macOS this is the fixed /opt/nordic/ncs path.
+--- On Linux/Windows it is the mise install_path (via --install-dir).
+---@param install_path string The mise-provided install path
+---@return string
+function M.get_toolchain_dir(install_path)
+    if RUNTIME.osType:lower() == "darwin" then
+        return TOOLCHAIN_DIRS["darwin"]
+    end
+    return install_path
+end
+
+--- Installs an NCS toolchain version.
+--- On Linux/Windows, installs directly into install_path via --install-dir.
+--- On macOS, --install-dir is not supported; toolchains go to /opt/nordic/ncs.
 ---@param version string NCS version (e.g. "2.7.0")
----@param install_path string Directory to install into
+---@param install_path string Directory to install into (used on Linux/Windows)
 function M.install_toolchain(version, install_path)
     local cmd = require("cmd")
     local log = require("log")
@@ -146,21 +169,21 @@ function M.install_toolchain(version, install_path)
     local nrfutil = M.ensure_nrfutil()
     local version_arg = "v" .. version:gsub("^v", "")
 
-    local install_cmd = nrfutil
-        .. " toolchain-manager install"
-        .. " --ncs-version "
-        .. version_arg
-        .. " --install-dir "
-        .. install_path
+    local install_cmd = nrfutil .. " toolchain-manager install --ncs-version " .. version_arg
 
-    log.info("Installing NCS toolchain " .. version_arg .. " to " .. install_path)
+    -- --install-dir is not supported on macOS (fixed at /opt/nordic/ncs)
+    if RUNTIME.osType:lower() ~= "darwin" then
+        install_cmd = install_cmd .. " --install-dir " .. install_path
+    end
+
+    log.info("Installing NCS toolchain " .. version_arg)
     cmd.exec(install_cmd)
 end
 
 --- Retrieves environment variables for an installed NCS toolchain.
 --- Parses the output of `nrfutil toolchain-manager env` for export lines.
 ---@param version string NCS version
----@param install_path string Installation directory
+---@param install_path string Installation directory (used on Linux/Windows)
 ---@return table[] env_vars Array of {key, value} tables
 function M.get_env_vars(version, install_path)
     local cmd = require("cmd")
@@ -169,19 +192,26 @@ function M.get_env_vars(version, install_path)
 
     local nrfutil = M.get_nrfutil_path()
     local version_arg = "v" .. version:gsub("^v", "")
+    local tc_dir = M.get_toolchain_dir(install_path)
 
-    local env_cmd = nrfutil
-        .. " toolchain-manager env"
-        .. " --ncs-version "
-        .. version_arg
-        .. " --install-dir "
-        .. install_path
-        .. " --as-script"
+    local env_cmd = nrfutil .. " toolchain-manager env --ncs-version " .. version_arg .. " --as-script"
+
+    -- --install-dir is not supported on macOS (fixed at /opt/nordic/ncs)
+    if RUNTIME.osType:lower() ~= "darwin" then
+        env_cmd = env_cmd:gsub(" --as%-script$", "") -- rebuild with --install-dir
+        env_cmd = nrfutil
+            .. " toolchain-manager env"
+            .. " --ncs-version "
+            .. version_arg
+            .. " --install-dir "
+            .. tc_dir
+            .. " --as-script"
+    end
 
     local ok, output = pcall(cmd.exec, env_cmd)
     if not ok then
         log.warn("nrfutil toolchain-manager env failed, falling back to manual env construction")
-        return M.build_env_vars_manual(install_path)
+        return M.build_env_vars_manual(tc_dir)
     end
 
     local env_vars = {}
@@ -207,7 +237,7 @@ function M.get_env_vars(version, install_path)
 
     if #env_vars == 0 then
         log.warn("No env vars parsed from nrfutil output, using manual fallback")
-        return M.build_env_vars_manual(install_path)
+        return M.build_env_vars_manual(tc_dir)
     end
 
     return env_vars
