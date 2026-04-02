@@ -1,30 +1,6 @@
---- LuaCATS type definitions for mise vfox plugins
+--- LuaCATS type definitions for mise backend plugins
 --- These annotations provide IDE support via lua-language-server.
 --- See https://luals.github.io/wiki/annotations/
----
----
----@class NCSVersionMetadata
----@field filename string
----@field sha512 string
----@field timestamp number
----@field version string
----
----@enum NcsJsonApiVersions
-NcsJsonApiVersion = {
-    V1 = 1,
-    V2 = 1,
-}
-
----@class NCSVersionData
----@field json_api_version NcsJsonApiVersions
----@field key string
----@field metadata NCSVersionMetadata
----
----
----@class NCSVersion
----@field version string
----@field url string
----@field sha512 string
 ------------------------------------------------------------------------
 -- Globals
 ------------------------------------------------------------------------
@@ -262,8 +238,4 @@ local html = {}
 ---@field error fun(...: any) Log at error level
 local log = {}
 
----@class json
----@field fetch_index fun(): string Encode a value as JSON
----@field decode fun(str: string): any Decode a JSON string
-local ncs = {}
 return nil

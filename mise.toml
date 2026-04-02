@@ -12,7 +12,7 @@ stylua = "latest"
 
 [tasks.format]
 description = "Format Lua scripts"
-run = "stylua metadata.lua hooks/"
+run = "stylua metadata.lua hooks/ lib/"
 
 [tasks.lint]
 description = "Lint Lua scripts and GitHub Actions using hk"
@@ -22,6 +22,29 @@ run = "hk check"
 description = "Fix linting issues"
 run = "hk fix"
 
-[tasks.ci]
-description = "Run all CI checks"
-depends = ["lint", "smoke-test", "integration-test"]
+
+[tasks.use-plugin]
+usage = '''
+arg "<ncs_version>" help="Zephyr SDK Version" {
+    default "3.2.1"
+}
+'''
+run = '''
+SDK_VERSION="${usage_sdk_version:?}"
+mise_toolname="ncs:toolchain-manager@${SDK_VERSION}"
+mise use "${mise_toolname?}"
+'''
+
+[tasks.test]
+description = "Run all CI checks: lint → smoke-test → integration-test"
+depends = ["lint", "format"]
+usage = '''
+arg "<ncs_version>" help="Zephyr SDK Version" {
+    default "3.2.1"
+}
+flag "-G --integration" help="Run integration test additional to the smoke test"
+'''
+run = '''
+WORKSPACE=$(mktemp -d)
+NCS_TEST_VERSION="${usage_ncs_version:?}" mise run ${=${usage_integration:-smoke-test}:+integration-test ${WORKSPACE}}
+'''

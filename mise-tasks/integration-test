@@ -1,35 +1,42 @@
 #!/usr/bin/env bash
-set -euo pipefail
-#MISE description="Integration test - build a Zephyr sample with the NCS toolchain"
-#MISE dir="{{config_root}}"
-#USAGE arg "[ncs_version]" help="NCS version to test with" default="v2.7.0" env="NCS_TEST_VERSION"
+#MISE description="Integration test - build a NCS sample with the NCS toolchain"
+#USAGE arg "<dir>" help="Workspace directory"
+#USAGE arg "<ncs_version>" help="NCS version to test with" env="NCS_TEST_VERSION"
 
-# ── Create temp workspace with cleanup ─────────────────────────────
-WORKSPACE=$(mktemp -d)
-APPDIR="${WORKSPACE?}/app"
-echo "Workspace: $WORKSPACE"
-mkdir "${APPDIR?}"
-cleanup() {
-    echo "Cleanup!"
-    mise plugin remove ncs-toolchain
-    mise cache clear
-    rm -rf "$WORKSPACE"
-}
-trap cleanup exit
+set -euo pipefail
+WORKSPACE="${usage_dir:?}"
 NCS_VERSION="${usage_ncs_version:?}"
 
-pushd "${APPDIR}"
+echo "WORKSPACE=${WORKSPACE} NCS_VERSION=$NCS_VERSION"
+pushd "${WORKSPACE}"
+APPDIR="${WORKSPACE?}/app"
+
+# cmsis was renamed to cmsis_6 in NCS ~3.2.0
+if printf '%s\n%s\n' "3.2.0" "${NCS_VERSION}" | sort -V | head -1 | grep -q "^3.2.0$"; then
+  CMSIS_MODULE="cmsis_6"
+else
+  CMSIS_MODULE="cmsis"
+fi
+cleanup() {
+  echo "Cleanup!"
+  rm -rf "$WORKSPACE"
+}
+trap cleanup EXIT
+
+# Try to list available versions for a test tool
+# Note: This will likely fail until you implement the backend methods
+# Replace <TEST_TOOL> with a real tool name your backend supports
 # ── Install toolchain ──────────────────────────────────────────────
-# Link your plugin for development
-mise plugin link --force ncs-toolchain "${MISE_CONFIG_ROOT:?}"
-# Test listing versions
-mise ls-remote ncs-toolchain
-# Test installation
-mise --debug install "ncs-toolchain@${NCS_VERSION}"
-mise use "ncs-toolchain@${NCS_VERSION}"
-mise env
-arm-zephyr-eabi-gcc --version
+mise plugins link --force ncs "${MISE_CONFIG_ROOT:?}"
+mise cache clear
+mise ls-remote ncs:toolchain-manager
+mise install "ncs:toolchain-manager@${NCS_VERSION}"
+mise x "ncs:toolchain-manager@${NCS_VERSION}" -- arm-zephyr-eabi-gcc --version
+mise x "ncs:toolchain-manager@${NCS_VERSION}" -- python --version
+mise x "ncs:toolchain-manager@${NCS_VERSION}" -- west --version
+
 # ── Write minimal west manifest ────────────────────────────────────
+mkdir "${APPDIR?}"
 cat >"${APPDIR}/west.yml" <<YAML
 manifest:
   remotes:
@@ -40,12 +47,12 @@ manifest:
     - name: sdk-nrf
       remote: ncs
       path: nrf
-      revision: ${NCS_VERSION}
+      revision: v${NCS_VERSION}
       clone-depth: 1
       import:
         name-allowlist:
           - zephyr
-          - cmsis
+          - ${CMSIS_MODULE}
           - hal_nordic
           - nrfxlib
 
@@ -53,34 +60,23 @@ manifest:
     path: app
 YAML
 
-# ── Setup west, python and dependencies ──────────────────────────────────────────────
-mise use uv
-PYTHON_VERSION=$(mise env --json | jq -r '.NCS_PYTHON_VERSION')
-mise use "python@${PYTHON_VERSION}"
-mise use pipx:west
-mise use ninja
 # ── West init & update ─────────────────────────────────────────────
-west init -l .
+pushd "${APPDIR}"
+# PYTHON_VERSION=$(mise env --json | jq -r '.NCS_PYTHON_VERSION')
+mise x pipx:west@1.5.0 -- west init -l .
 WEST_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ncs-plugin-test/west"
 mkdir -p "${WEST_CACHE}"
-west update -o=--depth=1 --narrow --auto-cache "${WEST_CACHE}"
-mise set ZEPHRY_BASE="${WORKSPACE}/zephyr"
-mise settings add python.uv_venv_auto "create|source"
-uv init --bare --no-package --python="${PYTHON_VERSION}" --pin-python
-uv add --dev \
-    -r "${WORKSPACE:?}/zephyr/scripts/requirements-base.txt" \
-    -r "${WORKSPACE:?}/zephyr/scripts/requirements-extras.txt" \
-    -r "${WORKSPACE:?}/nrf/scripts/requirements.txt"
-
-mise prep
-# ── Build hello_world sample ───────────────────────────────────────
-mise exec -c "west build -p -b nrf52840dk_nrf52840 ${WORKSPACE}/zephyr/samples/hello_world"
-popd
+mise x pipx:west@1.5.0 -- west update -o=--depth=1 --narrow --auto-cache "${WEST_CACHE}"
+# mise use ncs:toolchain-manager
+# mise run "$MISE_ORIGINAL_CWD/mise-tasks/uv-init" -r "${WORKSPACE}/zephyr/scripts/requirements.txt"
+mise set ZEPHYR_BASE="$WORKSPACE/zephyr"
+mise x "ncs:toolchain-manager@${NCS_VERSION}" -- west build -p -b nrf52840dk/nrf52840 "${WORKSPACE}/zephyr/samples/hello_world" --no-sysbuild
 
 # ── Verify output ──────────────────────────────────────────────────
-if [[ -d "${APPDIR}/build" && -e "${APPDIR}/build/merged.hex" ]]; then
-    echo "Integration test passed: zephyr.elf built successfully"
+if [[ -d build && -e build/zephyr/zephyr.elf ]]; then
+  echo "Integration test passed: zephyr.elf built successfully"
 else
-    echo "Integration test failed: build/zephyr/zephyr.elf not found"
-    exit 1
+  echo "Integration test failed: build/zephyr/zephyr.elf not found"
+  exit 1
 fi
+popd

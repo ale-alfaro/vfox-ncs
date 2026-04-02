@@ -1,11 +1,10 @@
 -- metadata.lua
 -- Plugin metadata and configuration
--- Documentation: https://mise.jdx.dev/tool-plugin-development.html#metadata-lua
+-- Documentation: https://mise.jdx.dev/backend-plugin-development.html
 
 PLUGIN = { -- luacheck: ignore
-    name = "ncs-toolchain",
-    version = "1.0.0",
-    description = "A mise tool plugin for the Nordic Connect SDK (NCS) toolchain",
+    name = "ncs",
+    version = "2.0.0",
+    description = "A mise backend plugin for Nordic Connect SDK (NCS) toolchains via nrfutil",
     author = "sibel",
-    minRuntimeVersion = "0.2.0",
 }

@@ -1,17 +1,72 @@
 name: Test Build
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  test-build:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v4
+      - run: mise run lint
+
+  smoke-test:
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
-        ncs_version: ["v2.7.0", "v2.8.0", "v2.9.0"]
+        ncs_version: ["2.7.0", "3.0.2", "3.2.1"]
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - run: mise run integration-test ${{ matrix.ncs_version }}
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+      - name: Cache nrfutil and subcommands
+        uses: actions/cache@v4
+        with:
+          path: ~/.nrfutil
+          key: nrfutil-${{ runner.os }}-${{ hashFiles('lib/ncs.lua') }}
+
+      - name: Cache NCS toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/mise/installs/ncs-toolchain-manager
+          key: ncs-toolchain-${{ runner.os }}-${{ matrix.ncs_version }}
+
+      - run: NCS_TEST_VERSION=${{ matrix.ncs_version }} mise run smoke-test
+
+  integration-test:
+    needs: smoke-test
+    strategy:
+      fail-fast: false
+      matrix:
+        ncs_version: ["2.7.0", "3.0.2", "3.2.1"]
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+      - name: Cache nrfutil and subcommands
+        uses: actions/cache@v4
+        with:
+          path: ~/.nrfutil
+          key: nrfutil-${{ runner.os }}-${{ hashFiles('lib/ncs.lua') }}
+
+      - name: Cache NCS toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/mise/installs/ncs-toolchain-manager
+          key: ncs-toolchain-${{ runner.os }}-${{ matrix.ncs_version }}
+
+      - run: |
+          WORKSPACE=$(mktemp -d)
+          NCS_TEST_VERSION=${{ matrix.ncs_version }} mise run integration-test "$WORKSPACE"
