@@ -1,45 +1,57 @@
 #!/usr/bin/env bash
 #MISE description="Run plugin tests - install and verify NCS toolchain"
 #USAGE arg "<ncs_version>" help="NCS version to test with" env="NCS_TEST_VERSION"
+#USAGE arg "<nrfutil_version>" help="nrfutil version to test with" default="latest"
 set -euo pipefail
 NCS_VERSION="${usage_ncs_version:?}"
-TEST_TOOLS=( "python" "west" "arm-zephyr-eabi-gcc" )
+NRFUTIL_VERSION="${usage_nrfutil_version:-latest}"
+TEST_TOOLS=("python" "west" "arm-zephyr-eabi-gcc")
 
-echo "NCS_VERSION=$NCS_VERSION TEST_TOOLS=${TEST_TOOLS[*]}"
+echo "NCS_VERSION=$NCS_VERSION NRFUTIL_VERSION=$NRFUTIL_VERSION TEST_TOOLS=${TEST_TOOLS[*]}"
 # ── Link and install plugin ──────────────────────────────────────────
-mise plugins link --force ncs "${MISE_CONFIG_ROOT:?}"
+mise plugins link --force ncs-test "${MISE_CONFIG_ROOT:?}"
 mise cache clear
 
 # Test that the plugin can list tools (this should work even if no tools are available)
 echo "Testing plugin linking and basic functionality..."
 
-# Try to list available versions for a test tool
-# Note: This will likely fail until you implement the backend methods
-# Replace <TEST_TOOL> with a real tool name your backend supports
-
-echo "Testing version listing for ${TEST_TOOLS[*]}..."
-if mise ls-remote "ncs:toolchain-manager@${NCS_VERSION}" 2>/dev/null; then
-  echo "✓ Version listing works"
+# ── nrfutil ──────────────────────────────────────────────────────────
+echo "Testing nrfutil version listing..."
+if mise ls-remote "ncs-test:nrfutil" 2>/dev/null; then
+  echo "✓ nrfutil version listing works"
 else
-  echo "⚠ Version listing failed - implement backend_list_versions.lua for your backend"
+  echo "⚠ nrfutil version listing failed - check backend_list_versions.lua"
 fi
 
-# Test installation if versions are available
-echo "Testing installation..."
-if mise install "ncs:toolchain-manager@${NCS_VERSION}" 2>/dev/null; then
-  echo "✓ Installation works"
+echo "Installing nrfutil ${NRFUTIL_VERSION}..."
+if mise install "ncs-test:nrfutil@${NRFUTIL_VERSION}" 2>/dev/null; then
+  echo "✓ nrfutil installation works"
+else
+  echo "⚠ nrfutil installation failed"
+  exit 1
+fi
 
-  for tool in ${TEST_TOOLS}; do
+# ── toolchain ────────────────────────────────────────────────────────
+echo "Testing toolchain version listing..."
+if mise ls-remote "ncs-test:toolchain" 2>/dev/null; then
+  echo "✓ Toolchain version listing works"
+else
+  echo "⚠ Toolchain version listing failed - check backend_list_versions.lua"
+fi
 
+echo "Installing NCS toolchain ${NCS_VERSION}..."
+if mise install "ncs-test:toolchain@${NCS_VERSION}" 2>/dev/null; then
+  echo "✓ Toolchain installation works"
+
+  for tool in "${TEST_TOOLS[@]}"; do
     echo "Testing tool: ${tool}"
-    if mise exec "ncs:toolchain-manager@${NCS_VERSION}" -- "${tool:?}" --version 2>/dev/null; then
-      echo "✓ Tool execution works"
+    if mise exec "ncs-test:nrfutil@${NRFUTIL_VERSION}" "ncs-test:toolchain@${NCS_VERSION}" -- "${tool:?}" --version 2>/dev/null; then
+      echo "✓ Tool execution works: ${tool}"
     else
-      echo "⚠ Tool execution failed - check backend_exec_env.lua implementation"
+      echo "⚠ Tool execution failed: ${tool} - check backend_exec_env.lua implementation"
     fi
   done
-  # Test that the tool can be executed
 else
-  echo "⚠ Installation failed - implement backend_install.lua for your backend"
+  echo "⚠ Toolchain installation failed - check backend_install.lua"
 fi
 echo "✓ Basic plugin structure tests completed"

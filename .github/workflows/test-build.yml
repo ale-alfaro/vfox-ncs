@@ -28,16 +28,16 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           experimental: true
-      - name: Cache nrfutil and subcommands
+      - name: Cache nrfutil install
         uses: actions/cache@v4
         with:
-          path: ~/.nrfutil
-          key: nrfutil-${{ runner.os }}-${{ hashFiles('lib/ncs.lua') }}
+          path: ~/.local/share/mise/installs/ncs-nrfutil
+          key: ncs-nrfutil-${{ runner.os }}-${{ hashFiles('lib/nrfutil.lua') }}
 
       - name: Cache NCS toolchain
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/mise/installs/ncs-toolchain-manager
+          path: ~/.local/share/mise/installs/ncs-toolchain
           key: ncs-toolchain-${{ runner.os }}-${{ matrix.ncs_version }}
 
       - run: NCS_TEST_VERSION=${{ matrix.ncs_version }} mise run smoke-test
@@ -55,16 +55,16 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           experimental: true
-      - name: Cache nrfutil and subcommands
+      - name: Cache nrfutil install
         uses: actions/cache@v4
         with:
-          path: ~/.nrfutil
-          key: nrfutil-${{ runner.os }}-${{ hashFiles('lib/ncs.lua') }}
+          path: ~/.local/share/mise/installs/ncs-nrfutil
+          key: ncs-nrfutil-${{ runner.os }}-${{ hashFiles('lib/nrfutil.lua') }}
 
       - name: Cache NCS toolchain
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/mise/installs/ncs-toolchain-manager
+          path: ~/.local/share/mise/installs/ncs-toolchain
           key: ncs-toolchain-${{ runner.os }}-${{ matrix.ncs_version }}
 
       - run: |
