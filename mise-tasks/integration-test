@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Integration test - build a NCS sample with the NCS toolchain"
+#MISE depends =["smoke-test"]
 #USAGE arg "<dir>" help="Workspace directory"
 #USAGE arg "<ncs_version>" help="NCS version to test with" env="NCS_TEST_VERSION"
 
@@ -23,22 +24,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Try to list available versions for a test tool
-# Note: This will likely fail until you implement the backend methods
-# Replace <TEST_TOOL> with a real tool name your backend supports
-# ── Install toolchain ──────────────────────────────────────────────
-mise plugins link --force ncs-test "${MISE_CONFIG_ROOT:?}"
-mise cache clear
-mise ls-remote ncs-test:nrfutil
-mise install "ncs-test:nrfutil@latest"
-mise ls-remote ncs-test:toolchain
-mise install "ncs-test:toolchain@${NCS_VERSION}"
-mise x "ncs-test:toolchain@${NCS_VERSION}" -- arm-zephyr-eabi-gcc --version
-mise x "ncs-test:toolchain@${NCS_VERSION}" -- python --version
-mise x "ncs-test:toolchain@${NCS_VERSION}" -- west --version
-
 # ── Write minimal west manifest ────────────────────────────────────
-mkdir "${APPDIR?}"
+mkdir -p "${APPDIR?}"
 cat >"${APPDIR}/west.yml" <<YAML
 manifest:
   remotes:
@@ -64,12 +51,12 @@ YAML
 
 # ── West init & update ─────────────────────────────────────────────
 pushd "${APPDIR}"
-# PYTHON_VERSION=$(mise env --json | jq -r '.NCS_PYTHON_VERSION')
 mise x pipx:west@1.5.0 -- west init -l .
 WEST_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ncs-plugin-test/west"
 mkdir -p "${WEST_CACHE}"
 mise x pipx:west@1.5.0 -- west update -o=--depth=1 --narrow --auto-cache "${WEST_CACHE}"
-# mise use ncs-test:toolchain-manager
+mise use -g ncs-test:nrfutil
+mise use -g "ncs-test:toolchain@${NCS_VERSION}"
 # mise run "$MISE_ORIGINAL_CWD/mise-tasks/uv-init" -r "${WORKSPACE}/zephyr/scripts/requirements.txt"
 mise set ZEPHYR_BASE="$WORKSPACE/zephyr"
 mise x "ncs-test:toolchain@${NCS_VERSION}" -- west build -p -b nrf52840dk/nrf52840 "${WORKSPACE}/zephyr/samples/hello_world" --no-sysbuild

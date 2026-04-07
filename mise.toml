@@ -22,7 +22,6 @@ run = "hk check"
 description = "Fix linting issues"
 run = "hk fix"
 
-
 [tasks.use-plugin]
 usage = '''
 arg "<ncs_version>" help="NCS toolchain version" {
@@ -39,16 +38,15 @@ mise use "ncs:nrfutil@${NRFUTIL_VERSION}"
 mise use "ncs:toolchain@${SDK_VERSION}"
 '''
 
-[tasks.test]
+[tasks.ci]
 description = "Run all CI checks: lint → smoke-test → integration-test"
 depends = ["lint", "format"]
 usage = '''
 arg "<ncs_version>" help="Zephyr SDK Version" {
     default "3.2.1"
 }
-flag "-G --integration" help="Run integration test additional to the smoke test"
 '''
 run = '''
 WORKSPACE=$(mktemp -d)
-NCS_TEST_VERSION="${usage_ncs_version:?}" mise run ${=${usage_integration:-smoke-test}:+integration-test ${WORKSPACE}}
+NCS_TEST_VERSION="${usage_ncs_version:?}" mise run integration-test ${WORKSPACE}
 '''

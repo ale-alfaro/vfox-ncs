@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #MISE description="Run plugin tests - install and verify NCS toolchain"
 #USAGE arg "<ncs_version>" help="NCS version to test with" env="NCS_TEST_VERSION"
-#USAGE arg "<nrfutil_version>" help="nrfutil version to test with" default="latest"
 set -euo pipefail
 NCS_VERSION="${usage_ncs_version:?}"
-NRFUTIL_VERSION="${usage_nrfutil_version:-latest}"
+NRFUTIL_VERSION="latest"
 TEST_TOOLS=("python" "west" "arm-zephyr-eabi-gcc")
 
 echo "NCS_VERSION=$NCS_VERSION NRFUTIL_VERSION=$NRFUTIL_VERSION TEST_TOOLS=${TEST_TOOLS[*]}"
