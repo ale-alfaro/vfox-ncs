@@ -1,5 +1,8 @@
 local M = {}
 
+require("utils")
+local path = require("pathlib")
+local sh = require("shell_exec")
 local platform = require("platform")
 
 --- Default toolchain directories per platform.
@@ -14,20 +17,18 @@ local TOOLCHAIN_DIRS = {
 --- Finds nrfutil on PATH. Errors with install instructions if not found.
 ---@return string nrfutil_path Absolute path to the nrfutil binary
 function M.find_nrfutil()
-    local cmd = require("cmd")
-    local strings = require("strings")
-
     local find_cmd = platform.get_os() == "windows" and "where nrfutil" or "which nrfutil"
-    local ok, path = pcall(cmd.exec, find_cmd)
-    if ok and path and path ~= "" then
-        return strings.trim_space(path)
+    local result = sh.safe_exec(find_cmd)
+    if result and result ~= "" then
+        return result
     end
 
-    error(
+    Utils.fatal(
         "nrfutil not found on PATH. "
             .. "Install it first with: mise use ncs:nrfutil@<version>\n"
             .. "Example: mise use ncs:nrfutil@8.1.1"
     )
+    return "" -- unreachable; Utils.fatal calls error()
 end
 
 --- Builds the toolchain index URL for the current platform.
@@ -61,23 +62,25 @@ end
 --- Parses version strings from the search output and filters by MIN_VERSION.
 ---@return string[] versions Sorted list of version strings (without "v" prefix)
 function M.list_versions()
-    local cmd = require("cmd")
     local strings = require("strings")
     local semver = require("semver")
-    local log = require("log")
 
     local nrfutil = M.find_nrfutil()
 
     -- Ensure toolchain-manager is installed
-    log.info("Ensuring nrfutil toolchain-manager is installed...")
-    cmd.exec(nrfutil .. " install --force --package-index-name " .. platform.PACKAGE_INDEX_NAME .. " toolchain-manager")
+    Utils.inf("Ensuring nrfutil toolchain-manager is installed...")
+    sh.safe_exec(
+        nrfutil .. " install --force --package-index-name " .. platform.PACKAGE_INDEX_NAME .. " toolchain-manager",
+        nil,
+        true
+    )
 
     -- Point toolchain-manager at the platform-specific NCS bundle index
     local tc_index = M.get_toolchain_index_url()
-    log.info("Setting toolchain index: " .. tc_index)
-    cmd.exec(nrfutil .. " toolchain-manager config --set toolchain-index=" .. tc_index)
+    Utils.inf("Setting toolchain index", { index = tc_index })
+    sh.safe_exec(nrfutil .. " toolchain-manager config --set toolchain-index=" .. tc_index, nil, true)
 
-    local output = cmd.exec(nrfutil .. " toolchain-manager search")
+    local output = sh.safe_exec(nrfutil .. " toolchain-manager search", nil, true)
 
     local versions = {}
     local lines = strings.split(output, "\n")
@@ -100,9 +103,6 @@ end
 ---@param version string NCS version (e.g. "2.7.0")
 ---@param install_path string Directory to install into (used on Linux/Windows)
 function M.install(version, install_path)
-    local cmd = require("cmd")
-    local log = require("log")
-
     local nrfutil = M.find_nrfutil()
     local version_arg = "v" .. version:gsub("^v", "")
 
@@ -113,8 +113,8 @@ function M.install(version, install_path)
         install_cmd = install_cmd .. " --install-dir " .. install_path
     end
 
-    log.info("Installing NCS toolchain " .. version_arg)
-    cmd.exec(install_cmd)
+    Utils.inf("Installing NCS toolchain", { version = version_arg })
+    sh.safe_exec(install_cmd, nil, true)
 end
 
 --- Retrieves environment variables for an installed NCS toolchain.
@@ -125,14 +125,13 @@ end
 ---@return table[] env_vars Array of {key, value} tables
 function M.exec_env(version, install_path)
     local strings = require("strings")
-    local log = require("log")
 
     local tc_dir = M.get_toolchain_dir(install_path)
 
     -- Try to find nrfutil; fall back to manual env if not available
     local ok_find, nrfutil = pcall(M.find_nrfutil)
     if not ok_find then
-        log.warn("nrfutil not on PATH, using manual env construction")
+        Utils.wrn("nrfutil not on PATH, using manual env construction")
         return M.build_env_vars_manual(tc_dir)
     end
 
@@ -150,10 +149,9 @@ function M.exec_env(version, install_path)
             .. " --as-script"
     end
 
-    local cmd = require("cmd")
-    local ok_exec, output = pcall(cmd.exec, env_cmd)
-    if not ok_exec then
-        log.warn("nrfutil toolchain-manager env failed, falling back to manual env construction")
+    local output = sh.safe_exec(env_cmd)
+    if not output then
+        Utils.wrn("nrfutil toolchain-manager env failed, falling back to manual env construction")
         return M.build_env_vars_manual(tc_dir)
     end
 
@@ -177,7 +175,7 @@ function M.exec_env(version, install_path)
     end
 
     if #env_vars == 0 then
-        log.warn("No env vars parsed from nrfutil output, using manual fallback")
+        Utils.wrn("No env vars parsed from nrfutil output, using manual fallback")
         return M.build_env_vars_manual(tc_dir)
     end
 
@@ -188,30 +186,27 @@ end
 ---@param install_path string Installation directory
 ---@return table[] env_vars Array of {key, value} tables
 function M.build_env_vars_manual(install_path)
-    local file = require("file")
-    local log = require("log")
-
     local env_vars = {}
-    local usr_bin = file.join_path(install_path, "usr", "local", "bin")
-    local usr_lib = file.join_path(install_path, "usr", "local", "lib")
-    local sdk_dir = file.join_path(install_path, "opt", "zephyr-sdk")
-    local sdk_bin = file.join_path(sdk_dir, "arm-zephyr-eabi", "bin")
+    local usr_bin = path.Path({ install_path, "usr", "local", "bin" }, { check_exists = true })
+    local usr_lib = path.Path({ install_path, "usr", "local", "lib" }, { check_exists = true })
+    local sdk_dir = path.Path({ install_path, "opt", "zephyr-sdk" }, { check_exists = true })
+    local sdk_bin = path.Path({ install_path, "opt", "zephyr-sdk", "arm-zephyr-eabi", "bin" }, { check_exists = true })
 
-    if file.exists(usr_bin) then
+    if usr_bin ~= "" then
         table.insert(env_vars, { key = "PATH", value = usr_bin })
     end
-    if file.exists(sdk_bin) then
+    if sdk_bin ~= "" then
         table.insert(env_vars, { key = "PATH", value = sdk_bin })
     end
-    if file.exists(usr_lib) then
+    if usr_lib ~= "" then
         table.insert(env_vars, { key = "LD_LIBRARY_PATH", value = usr_lib })
     end
-    if file.exists(sdk_dir) then
+    if sdk_dir ~= "" then
         table.insert(env_vars, { key = "ZEPHYR_TOOLCHAIN_VARIANT", value = "zephyr" })
         table.insert(env_vars, { key = "ZEPHYR_SDK_INSTALL_DIR", value = sdk_dir })
     end
 
-    log.debug("Built manual env vars for NCS toolchain at " .. install_path)
+    Utils.dbg("Built manual env vars for NCS toolchain", { install_path = install_path })
     return env_vars
 end
 

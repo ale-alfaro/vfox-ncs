@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Integration test - build a NCS sample with the NCS toolchain"
-#MISE depends =["smoke-test"]
+#MISE hide=true
 #USAGE arg "<dir>" help="Workspace directory"
 #USAGE arg "<ncs_version>" help="NCS version to test with" env="NCS_TEST_VERSION"
 
@@ -20,6 +20,8 @@ else
 fi
 cleanup() {
   echo "Cleanup!"
+  mise uninstall "ncs-test:west@${NCS_VERSION}" 2>/dev/null || true
+  mise uninstall "ncs-test:toolchain@${NCS_VERSION}" 2>/dev/null || true
   rm -rf "$WORKSPACE"
 }
 trap cleanup EXIT
@@ -51,12 +53,10 @@ YAML
 
 # ── West init & update ─────────────────────────────────────────────
 pushd "${APPDIR}"
-mise x pipx:west@1.5.0 -- west init -l .
+mise x "ncs-test:west@${NCS_VERSION}" -- west init -l .
 WEST_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ncs-plugin-test/west"
 mkdir -p "${WEST_CACHE}"
-mise x pipx:west@1.5.0 -- west update -o=--depth=1 --narrow --auto-cache "${WEST_CACHE}"
-mise use -g ncs-test:nrfutil
-mise use -g "ncs-test:toolchain@${NCS_VERSION}"
+mise x "ncs-test:west@${NCS_VERSION}" -- west update -o=--depth=1 --narrow --auto-cache "${WEST_CACHE}"
 # mise run "$MISE_ORIGINAL_CWD/mise-tasks/uv-init" -r "${WORKSPACE}/zephyr/scripts/requirements.txt"
 mise set ZEPHYR_BASE="$WORKSPACE/zephyr"
 mise x "ncs-test:toolchain@${NCS_VERSION}" -- west build -p -b nrf52840dk/nrf52840 "${WORKSPACE}/zephyr/samples/hello_world" --no-sysbuild

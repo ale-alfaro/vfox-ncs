@@ -4,6 +4,7 @@
 --- @param ctx BackendExecEnvCtx
 --- @return BackendExecEnvResult
 function PLUGIN:BackendExecEnv(ctx)
+    require("utils")
     local log = require("log")
 
     if ctx.tool == "nrfutil" then
@@ -14,6 +15,10 @@ function PLUGIN:BackendExecEnv(ctx)
         local toolchain = require("toolchain")
         log.debug("Setting up NCS toolchain environment for " .. ctx.version)
         return { env_vars = toolchain.exec_env(ctx.version, ctx.install_path) }
+    elseif ctx.tool == "west" then
+        local west = require("west")
+        Utils.dbg("Setting up west environment at " .. ctx.install_path)
+        return { env_vars = west.exec_env(ctx.version, ctx.install_path) }
     else
         error("Unknown tool: " .. tostring(ctx.tool))
     end

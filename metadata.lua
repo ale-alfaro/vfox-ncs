@@ -6,5 +6,5 @@ PLUGIN = { -- luacheck: ignore
     name = "ncs",
     version = "2.0.0",
     description = "A mise backend plugin for Nordic Connect SDK (NCS) toolchains via nrfutil",
-    author = "sibel",
+    author = "ale-alfaro",
 }

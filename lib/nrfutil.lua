@@ -1,5 +1,8 @@
 local M = {}
 
+require("utils")
+local path = require("pathlib")
+local sh = require("shell_exec")
 local platform = require("platform")
 
 --- Fetches available nrfutil core module versions for the current platform.
@@ -16,10 +19,10 @@ function M.list_versions()
     })
 
     if err ~= nil then
-        error("Failed to fetch nrfutil package listing: " .. err)
+        Utils.fatal("Failed to fetch nrfutil package listing", { err = err })
     end
     if resp.status_code ~= 200 then
-        error("Artifactory returned HTTP " .. resp.status_code)
+        Utils.fatal("Artifactory returned HTTP error", { status_code = resp.status_code })
     end
 
     local data = json.decode(resp.body)
@@ -57,7 +60,7 @@ function M.get_nrfutil_url()
     local key = os_name .. "-" .. arch
     local url = platform.NRFUTIL_URLS[key]
     if not url then
-        error("Unsupported platform for nrfutil: " .. key)
+        Utils.fatal("Unsupported platform for nrfutil", { platform = key })
     end
     return url
 end
@@ -77,65 +80,64 @@ end
 function M.install(version, install_path)
     local http = require("http")
     local cmd = require("cmd")
-    local file = require("file")
-    local log = require("log")
 
-    local bin_dir = file.join_path(install_path, "bin")
-    local home_dir = file.join_path(install_path, "home")
-    local download_dir = file.join_path(install_path, "download")
+    local bin_dir = path.Path({ install_path, "bin" })
+    local home_dir = path.Path({ install_path, "home" })
+    local download_dir = path.Path({ install_path, "download" })
 
-    cmd.exec("mkdir -p " .. bin_dir .. " " .. home_dir .. " " .. download_dir)
+    sh.safe_exec("mkdir -p " .. bin_dir .. " " .. home_dir .. " " .. download_dir, nil, true)
 
     -- 1. Download the launcher executable
     local exe_suffix = platform.get_exe_suffix()
-    local launcher_dest = file.join_path(bin_dir, "nrfutil" .. exe_suffix)
+    local launcher_dest = path.Path({ bin_dir, "nrfutil" .. exe_suffix })
     local launcher_url = M.get_nrfutil_url()
-    log.info("Downloading nrfutil launcher from " .. launcher_url)
+    Utils.inf("Downloading nrfutil launcher", { url = launcher_url })
     local err = http.download_file({
         url = launcher_url,
         headers = { ["User-Agent"] = "mise-plugin" },
     }, launcher_dest)
     if err ~= nil then
-        error("Failed to download nrfutil launcher: " .. err)
+        Utils.fatal("Failed to download nrfutil launcher", { err = err })
     end
 
     if platform.get_os() ~= "windows" then
-        cmd.exec("chmod +x " .. launcher_dest)
+        sh.safe_exec("chmod +x " .. launcher_dest, nil, true)
     end
 
     -- 2. Download the versioned core module tarball
     local tarball_url = M.get_tarball_url(version)
     local triple = platform.get_platform_triple()
     local tarball_name = "nrfutil-" .. triple .. "-" .. version .. ".tar.gz"
-    local tarball_path = file.join_path(download_dir, tarball_name)
-    log.info("Downloading nrfutil core " .. version .. " from " .. tarball_url)
+    local tarball_path = path.Path({ download_dir, tarball_name })
+    Utils.inf("Downloading nrfutil core", { version = version, url = tarball_url })
     err = http.download_file({
         url = tarball_url,
         headers = { ["User-Agent"] = "mise-plugin" },
     }, tarball_path)
     if err ~= nil then
-        error("Failed to download nrfutil core tarball: " .. err)
+        Utils.fatal("Failed to download nrfutil core tarball", { err = err })
     end
 
     -- 3. Bootstrap: pin core version via tarball path, run nrfutil to trigger install
-    log.info("Bootstrapping nrfutil core " .. version)
-    cmd.exec(launcher_dest .. " --version", {
+    Utils.inf("Bootstrapping nrfutil core", { version = version })
+    sh.safe_exec(launcher_dest .. " --version", {
         env = {
             NRFUTIL_HOME = home_dir,
             NRFUTIL_BOOTSTRAP_TARBALL_PATH = tarball_path,
         },
-    })
+    }, true)
 
     -- 4. Configure the package index (needed for toolchain-manager later)
     local idx_name = platform.PACKAGE_INDEX_NAME
     local idx_url = platform.PACKAGE_INDEX_URL
     pcall(cmd.exec, launcher_dest .. " config package-index remove " .. idx_name, { env = { NRFUTIL_HOME = home_dir } })
-    cmd.exec(
+    sh.safe_exec(
         launcher_dest .. " config package-index add " .. idx_name .. " " .. idx_url,
-        { env = { NRFUTIL_HOME = home_dir } }
+        { env = { NRFUTIL_HOME = home_dir } },
+        true
     )
 
-    log.info("nrfutil " .. version .. " installed successfully")
+    Utils.inf("nrfutil installed successfully", { version = version })
 end
 
 --- Returns environment variables for an installed nrfutil version.
@@ -143,10 +145,9 @@ end
 ---@param install_path string Installation directory
 ---@return table[] env_vars Array of {key, value} tables
 function M.exec_env(version, install_path) -- luacheck: no unused args
-    local file = require("file")
     return {
-        { key = "PATH", value = file.join_path(install_path, "bin") },
-        { key = "NRFUTIL_HOME", value = file.join_path(install_path, "home") },
+        { key = "PATH", value = path.Path({ install_path, "bin" }) },
+        { key = "NRFUTIL_HOME", value = path.Path({ install_path, "home" }) },
     }
 end
 

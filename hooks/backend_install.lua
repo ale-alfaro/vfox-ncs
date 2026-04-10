@@ -4,6 +4,7 @@
 --- @param ctx BackendInstallCtx
 --- @return BackendInstallResult
 function PLUGIN:BackendInstall(ctx)
+    require("utils")
     local log = require("log")
 
     if ctx.tool == "nrfutil" then
@@ -14,6 +15,10 @@ function PLUGIN:BackendInstall(ctx)
         local toolchain = require("toolchain")
         log.info("Installing NCS toolchain " .. ctx.version)
         toolchain.install(ctx.version, ctx.install_path)
+    elseif ctx.tool == "west" then
+        local west = require("west")
+        Utils.inf("Installing west shim " .. ctx.version)
+        west.install(ctx.version, ctx.install_path)
     else
         error("Unknown tool: " .. tostring(ctx.tool))
     end

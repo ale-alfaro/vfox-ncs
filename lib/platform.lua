@@ -1,5 +1,7 @@
 local M = {}
 
+require("utils")
+
 M.ARTIFACTORY_BASE_URL = "https://files.nordicsemi.com/artifactory"
 M.NRFUTIL_BASE_URL = M.ARTIFACTORY_BASE_URL .. "/swtools/external/nrfutil"
 M.PACKAGE_INDEX_URL = M.NRFUTIL_BASE_URL .. "/index/init.json"
@@ -32,7 +34,7 @@ function M.get_platform_triple()
     local mapped_arch = M.ARCH_MAP[arch] or arch
     local mapped_os = M.OS_MAP[os_name]
     if not mapped_os then
-        error("Unsupported OS: " .. os_name)
+        Utils.fatal("Unsupported OS", { os = os_name })
     end
     return mapped_arch .. "-" .. mapped_os
 end
