@@ -9,7 +9,6 @@ hk = "latest"
 jq = "latest"
 lua = "5.4"
 lua-language-server = "latest"
-"ncs-test:nrfutil" = "8.1.1"
 pkl = "latest"
 stylua = "latest"
 

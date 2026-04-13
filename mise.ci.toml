@@ -1,5 +1,6 @@
 [env]
 MISE_USE_VERSIONS_HOST = "0"
+BACKEND = "ncs-test"
 
 [tools]
 actionlint = "latest"
@@ -14,6 +15,7 @@ run = "hk check"
 
 [tasks.test]
 description = "Run all CI checks: lint → smoke-test → integration-test"
+tools = { "uv" = "latest" }
 depends = ["lint"]
 run = '''
 mise run smoke-test

@@ -20,23 +20,17 @@ jobs:
       BACKEND_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v6
       - uses: jdx/mise-action@v4
         with:
           experimental: true
       - name: Cache nrfutil install
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/mise/installs/ncs-nrfutil
+          path: ~/.nrfutil
           key: ncs-nrfutil-${{ runner.os }}-${{ hashFiles('lib/nrfutil.lua') }}
       - name: Cache NCS toolchain
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/mise/installs/ncs-toolchain
+          path: ~/ncs
           key: ncs-toolchain-${{ runner.os }}-${{ matrix.version }}
-      - name: Bootstrap nrfutil (needed by toolchain/west version listing)
-        run: |
-          mise plugins link --force "${BACKEND}" .
-          mise install "${BACKEND}:nrfutil@8.1.1"
-          mise use -g "${BACKEND}:nrfutil@8.1.1"
-      - run: mise run test
+      - run: mise run test -t 5m --continue-on-error --fresh-env

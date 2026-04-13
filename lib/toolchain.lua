@@ -1,14 +1,16 @@
+---@class NcsTool
 local M = {}
 
-require("utils")
-local path = require("pathlib")
-local sh = require("shell_exec")
-local platform = require("platform")
-
+local path = Utils.fs
+local sh = Utils.sh
 --- Finds nrfutil on PATH. Errors with install instructions if not found.
 ---@return string nrfutil_path Absolute path to the nrfutil binary
 function M.find_nrfutil()
-    local find_cmd = platform.get_os() == "windows" and "where nrfutil" or "which nrfutil"
+    local nrfutil_home = NRFUTIL_HOME
+    if Utils.fs.path_exists(nrfutil_home, { type = "directory" }) then
+        return Utils.fs.Path({ nrfutil_home, "bin", "nrfutil" }, { type = "file", fail = true })
+    end
+    local find_cmd = sh.get_os() == "windows" and "where nrfutil" or "which nrfutil"
     local result = sh.safe_exec(find_cmd)
     if result and result ~= "" then
         return result
@@ -25,7 +27,7 @@ end
 --- Builds the toolchain index URL for the current platform.
 ---@return string
 function M.get_toolchain_index_url()
-    local os_name = platform.get_os()
+    local os_name = sh.get_os()
     local arch = RUNTIME.archType
 
     local os_map = { linux = "linux", darwin = "macos" }
@@ -56,18 +58,14 @@ function M.list_versions()
 
     -- Ensure toolchain-manager is installed
     Utils.inf("Ensuring nrfutil toolchain-manager is installed...")
-    sh.safe_exec(
-        nrfutil .. " install --force --package-index-name " .. platform.PACKAGE_INDEX_NAME .. " toolchain-manager",
-        nil,
-        true
-    )
+    sh.safe_exec(nrfutil .. " install toolchain-manager", { fail = true })
 
     -- Point toolchain-manager at the platform-specific NCS bundle index
-    local tc_index = M.get_toolchain_index_url()
-    Utils.inf("Setting toolchain index", { index = tc_index })
-    sh.safe_exec(nrfutil .. " toolchain-manager config --set toolchain-index=" .. tc_index, nil, true)
+    -- local tc_index = M.get_toolchain_index_url()
+    -- Utils.inf("Setting toolchain index", { index = tc_index })
+    -- sh.safe_exec(nrfutil .. " toolchain-manager config --set toolchain-index=" .. tc_index, { fail = true })
 
-    local output = sh.safe_exec(nrfutil .. " toolchain-manager search", nil, true)
+    local output = sh.safe_exec(nrfutil .. " toolchain-manager search", { fail = true })
 
     local versions = {}
     local lines = strings.split(output, "\n")
@@ -75,7 +73,7 @@ function M.list_versions()
         local ver = line:match("(v?%d+%.%d+%.%d+[%w%-%.]*)")
         if ver then
             local clean = ver:gsub("^v", "")
-            if semver.compare(clean, platform.MIN_VERSION) >= 0 then
+            if semver.compare(clean, NCS_MIN_VERSION) >= 0 then
                 table.insert(versions, clean)
             end
         end
@@ -85,9 +83,9 @@ function M.list_versions()
 end
 
 --- Installs an NCS toolchain version into install_path via --install-dir.
----@param version string NCS version (e.g. "2.7.0")
----@param install_path string Directory to install into
-function M.install(version, install_path)
+---@param ctx BackendInstallCtx
+function M.install(ctx)
+    local version, install_path = ctx.version, ctx.install_path
     local nrfutil = M.find_nrfutil()
     local version_arg = "v" .. version:gsub("^v", "")
 
@@ -98,74 +96,14 @@ function M.install(version, install_path)
         .. install_path
 
     Utils.inf("Installing NCS toolchain", { version = version_arg, install_path = install_path })
-    sh.safe_exec(install_cmd, nil, true)
-end
-
---- Retrieves environment variables for an installed NCS toolchain.
---- Parses the output of `nrfutil toolchain-manager env` for export lines.
---- Falls back to manual env construction if nrfutil is unavailable or fails.
----@param version string NCS version
----@param install_path string Installation directory (used on Linux/Windows)
----@return table[] env_vars Array of {key, value} tables
-function M.exec_env(version, install_path)
-    local strings = require("strings")
-
-    local tc_dir = M.get_toolchain_dir(install_path)
-
-    -- Try to find nrfutil; fall back to manual env if not available
-    local ok_find, nrfutil = pcall(M.find_nrfutil)
-    if not ok_find then
-        Utils.wrn("nrfutil not on PATH, using manual env construction")
-        return M.build_env_vars_manual(tc_dir)
-    end
-
-    local version_arg = "v" .. version:gsub("^v", "")
-
-    local env_cmd = nrfutil
-        .. " toolchain-manager env"
-        .. " --ncs-version "
-        .. version_arg
-        .. " --install-dir "
-        .. tc_dir
-        .. " --as-script"
-
-    local output = sh.safe_exec(env_cmd)
-    if not output then
-        Utils.wrn("nrfutil toolchain-manager env failed, falling back to manual env construction")
-        return M.build_env_vars_manual(tc_dir)
-    end
-
-    local env_vars = {}
-    local lines = strings.split(output, "\n")
-    for _, line in ipairs(lines) do
-        local key, value = line:match('^export%s+([%w_]+)="?(.-)"?$')
-        if key and value then
-            if key == "PATH" then
-                local parts = strings.split(value, ":")
-                for _, p in ipairs(parts) do
-                    local trimmed = strings.trim_space(p)
-                    if trimmed ~= "" and trimmed ~= "$PATH" then
-                        table.insert(env_vars, { key = "PATH", value = trimmed })
-                    end
-                end
-            else
-                table.insert(env_vars, { key = key, value = value })
-            end
-        end
-    end
-
-    if #env_vars == 0 then
-        Utils.wrn("No env vars parsed from nrfutil output, using manual fallback")
-        return M.build_env_vars_manual(tc_dir)
-    end
-
-    return env_vars
+    sh.safe_exec(install_cmd, { fail = true })
 end
 
 --- Fallback: construct env vars from known NCS toolchain directory layout.
----@param install_path string Installation directory
+---@param ctx BackendExecEnvCtx Installation directory
 ---@return table[] env_vars Array of {key, value} tables
-function M.build_env_vars_manual(install_path)
+function M.envs(ctx) -- luacheck: no unused args
+    local install_path = ctx.install_path
     local env_vars = {}
     local usr_bin = path.Path({ install_path, "usr", "local", "bin" }, { check_exists = true })
     local usr_lib = path.Path({ install_path, "usr", "local", "lib" }, { check_exists = true })
