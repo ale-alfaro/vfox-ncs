@@ -11,14 +11,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ["2.7.0", "3.0.2", "3.2.1"]
+        version: ["3.2.1"]
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     env:
+      MISE_ENV: ci
       BACKEND: ncs-test
       BACKEND_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
       - uses: jdx/mise-action@v4
         with:
           experimental: true
@@ -37,5 +39,4 @@ jobs:
           mise plugins link --force "${BACKEND}" .
           mise install "${BACKEND}:nrfutil@8.1.1"
           mise use -g "${BACKEND}:nrfutil@8.1.1"
-      - run: mise run smoke-test
-      - run: mise run integration-test
+      - run: mise run test

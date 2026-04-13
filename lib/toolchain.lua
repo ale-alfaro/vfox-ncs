@@ -5,15 +5,6 @@ local path = require("pathlib")
 local sh = require("shell_exec")
 local platform = require("platform")
 
---- Default toolchain directories per platform.
---- macOS is fixed at /opt/nordic/ncs (Python/dyld requires deterministic path).
---- Linux/Windows defaults can be overridden with --install-dir.
-local TOOLCHAIN_DIRS = {
-    darwin = "/opt/nordic/ncs",
-    linux = (os.getenv("HOME") or "") .. "/ncs",
-    windows = "C:\\ncs",
-}
-
 --- Finds nrfutil on PATH. Errors with install instructions if not found.
 ---@return string nrfutil_path Absolute path to the nrfutil binary
 function M.find_nrfutil()
@@ -47,14 +38,10 @@ function M.get_toolchain_index_url()
 end
 
 --- Returns the effective toolchain base directory for the current platform.
---- On macOS this is the fixed /opt/nordic/ncs path.
---- On Linux/Windows it is the mise install_path (via --install-dir).
+--- Always uses the mise install_path via --install-dir.
 ---@param install_path string The mise-provided install path
 ---@return string
 function M.get_toolchain_dir(install_path)
-    if platform.get_os() == "darwin" then
-        return TOOLCHAIN_DIRS["darwin"]
-    end
     return install_path
 end
 
@@ -97,23 +84,20 @@ function M.list_versions()
     return semver.sort(versions)
 end
 
---- Installs an NCS toolchain version.
---- On Linux/Windows, installs directly into install_path via --install-dir.
---- On macOS, --install-dir is not supported; toolchains go to /opt/nordic/ncs.
+--- Installs an NCS toolchain version into install_path via --install-dir.
 ---@param version string NCS version (e.g. "2.7.0")
----@param install_path string Directory to install into (used on Linux/Windows)
+---@param install_path string Directory to install into
 function M.install(version, install_path)
     local nrfutil = M.find_nrfutil()
     local version_arg = "v" .. version:gsub("^v", "")
 
-    local install_cmd = nrfutil .. " toolchain-manager install --ncs-version " .. version_arg
+    local install_cmd = nrfutil
+        .. " toolchain-manager install --ncs-version "
+        .. version_arg
+        .. " --install-dir "
+        .. install_path
 
-    -- --install-dir is not supported on macOS (fixed at /opt/nordic/ncs)
-    if platform.get_os() ~= "darwin" then
-        install_cmd = install_cmd .. " --install-dir " .. install_path
-    end
-
-    Utils.inf("Installing NCS toolchain", { version = version_arg })
+    Utils.inf("Installing NCS toolchain", { version = version_arg, install_path = install_path })
     sh.safe_exec(install_cmd, nil, true)
 end
 
@@ -137,17 +121,13 @@ function M.exec_env(version, install_path)
 
     local version_arg = "v" .. version:gsub("^v", "")
 
-    local env_cmd = nrfutil .. " toolchain-manager env --ncs-version " .. version_arg .. " --as-script"
-
-    if platform.get_os() ~= "darwin" then
-        env_cmd = nrfutil
-            .. " toolchain-manager env"
-            .. " --ncs-version "
-            .. version_arg
-            .. " --install-dir "
-            .. tc_dir
-            .. " --as-script"
-    end
+    local env_cmd = nrfutil
+        .. " toolchain-manager env"
+        .. " --ncs-version "
+        .. version_arg
+        .. " --install-dir "
+        .. tc_dir
+        .. " --as-script"
 
     local output = sh.safe_exec(env_cmd)
     if not output then
