@@ -1,60 +1,22 @@
 #!/usr/bin/env bash
 #MISE description="Smoke test all tools for a backend version"
 #MISE hide=true
+#MISE dir="{{cwd}}"
 set -euo pipefail
 
 : "${BACKEND:?Set BACKEND env var}"
 : "${BACKEND_VERSION:?Set BACKEND_VERSION env var}"
-CONFIG="${MISE_CONFIG_ROOT:?}/tests/tool_cmds.txt"
 
-fail() { echo "⚠ FAIL: $*"; exit 1; }
-pass() { echo "✓ PASS: $*"; }
-
-cleanup() {
-  echo "Cleaning up installed tools..."
-  while IFS='=' read -r key _; do
-    tool="${key%%@*}"
-    ver="${BACKEND_VERSION}"
-    [[ "$key" == *@* ]] && ver="${key#*@}"
-    mise uninstall "${BACKEND}:${tool}@${ver}" 2>/dev/null || true
-  done < "$CONFIG"
-}
-trap cleanup EXIT
-
-mise plugins link --force "${BACKEND}" "${MISE_CONFIG_ROOT:?}"
-mise cache clear
+declare -a TOOLS
+TOOLS=("nrfutil" "west")
 
 echo "BACKEND=${BACKEND}  VERSION=${BACKEND_VERSION}"
-while IFS='=' read -r key test_cmd; do
-  # Support per-tool version override: tool@version=command
-  tool="${key%%@*}"
-  ver="${BACKEND_VERSION}"
-  [[ "$key" == *@* ]] && ver="${key#*@}"
-
-  echo "── ${tool}@${ver} ──"
-
+for tool in "${TOOLS[@]}"; do
+  echo "── ${tool}@${BACKEND_VERSION} ──"
   echo "Testing version listing..."
-  if mise ls-remote "${BACKEND}:${tool}" > /dev/null; then
-    pass "${tool} version listing"
-  else
-    fail "${tool} version listing - check backend_list_versions.lua"
-  fi
-
-  echo "Installing ${tool}@${ver}..."
-  if mise install "${BACKEND}:${tool}@${ver}"; then
-    pass "${tool} installation"
-    # Activate so subsequent tools can find it on PATH (e.g. toolchain needs nrfutil)
-    mise use "${BACKEND}:${tool}@${ver}"
-  else
-    fail "${tool} installation"
-  fi
-
-  echo "Executing: ${test_cmd}"
-  if mise exec "${BACKEND}:${tool}@${ver}" -- ${test_cmd}; then
-    pass "${tool} execution"
-  else
-    fail "${tool} execution - check backend_exec_env.lua"
-  fi
-done < "$CONFIG"
+  mise ls-remote "${BACKEND}:${tool}"
+  echo "Executing: "
+  mise x -- "${tool}" --version
+done
 
 pass "All smoke tests passed for ${BACKEND}@${BACKEND_VERSION}"

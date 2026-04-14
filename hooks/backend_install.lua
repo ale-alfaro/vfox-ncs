@@ -11,6 +11,6 @@ function PLUGIN:BackendInstall(ctx)
         return {}
     end
     Utils.inf("Preparing to install  tool: ", { tool = tool, ctx = ctx })
-    tool.install(ctx)
+    tool.install(ctx.version, ctx.install_path, ctx.download_path)
     return {}
 end
