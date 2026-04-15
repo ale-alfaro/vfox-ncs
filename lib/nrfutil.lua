@@ -1,153 +1,111 @@
+---@class NcsTool
 local M = {}
 
-local platform = require("platform")
+local path = Utils.fs
+local sh = Utils.sh
 
---- Fetches available nrfutil core module versions for the current platform.
---- Queries the Artifactory storage API, filters to current platform and stable releases.
----@return string[] versions Sorted list of version strings
-function M.list_versions()
-    local http = require("http")
-    local json = require("json")
-    local semver = require("semver")
-
-    local resp, err = http.get({
-        url = platform.PACKAGES_API_URL,
-        headers = { ["User-Agent"] = "mise-plugin" },
-    })
-
-    if err ~= nil then
-        error("Failed to fetch nrfutil package listing: " .. err)
-    end
-    if resp.status_code ~= 200 then
-        error("Artifactory returned HTTP " .. resp.status_code)
-    end
-
-    local data = json.decode(resp.body)
-    local triple = platform.get_platform_triple()
-    local versions = {}
-
-    for _, child in ipairs(data.children) do
-        if not child.folder then
-            local name = child.uri:gsub("^/", "")
-            -- Pattern: nrfutil-{triple}-{version}.tar.gz
-            local file_triple, version = name:match("^nrfutil%-(.+)-(%d+%.%d+%.%d+[%w%-%.]*).tar.gz$")
-            if file_triple and version and file_triple == triple then
-                -- Exclude pre-release versions (alpha, beta, rc, dev)
-                if not version:match("%-") then
-                    table.insert(versions, version)
-                end
-            end
-        end
-    end
-
-    return semver.sort(versions)
-end
-
---- Returns the nrfutil launcher download URL for the current platform.
+local ARTIFACTORY_BASE_URL = "https://files.nordicsemi.com/artifactory"
+local NRFUTIL_BASE_URL = ARTIFACTORY_BASE_URL .. "/swtools/external/nrfutil"
+local NRFUTIL_URLS = {
+    ["darwin"] = NRFUTIL_BASE_URL .. "/executables/universal-apple-darwin/nrfutil",
+    ["linux-amd64"] = NRFUTIL_BASE_URL .. "/executables/x86_64-unknown-linux-gnu/nrfutil",
+    ["linux-arm64"] = NRFUTIL_BASE_URL .. "/executables/aarch64-unknown-linux-gnu/nrfutil",
+    ["windows-amd64"] = NRFUTIL_BASE_URL .. "/executables/x86_64-pc-windows-msvc/nrfutil.exe",
+}
+--- Returns the nrfutil launcher download URL for the current
 ---@return string
-function M.get_nrfutil_url()
-    local os_name = platform.get_os()
+local function get_nrfutil_url()
+    local os_name = sh.get_os()
     local arch = RUNTIME.archType
 
     -- macOS uses a universal binary
     if os_name == "darwin" then
-        return platform.NRFUTIL_URLS["darwin"]
+        return NRFUTIL_URLS["darwin"]
     end
 
     local key = os_name .. "-" .. arch
-    local url = platform.NRFUTIL_URLS[key]
+    local url = NRFUTIL_URLS[key]
     if not url then
-        error("Unsupported platform for nrfutil: " .. key)
+        Utils.fatal("Unsupported platform for nrfutil", { platform = key })
     end
     return url
 end
-
---- Returns the download URL for a specific nrfutil core module tarball.
----@param version string Core module version (e.g. "8.1.1")
----@return string
-function M.get_tarball_url(version)
-    local triple = platform.get_platform_triple()
-    return platform.NRFUTIL_BASE_URL .. "/packages/nrfutil/nrfutil-" .. triple .. "-" .. version .. ".tar.gz"
-end
-
 --- Installs a specific version of nrfutil (launcher + pinned core module).
 --- Layout: install_path/bin/nrfutil, install_path/home/, install_path/download/
----@param version string Core module version (e.g. "8.1.1")
----@param install_path string Mise-provided installation directory
-function M.install(version, install_path)
-    local http = require("http")
-    local cmd = require("cmd")
-    local file = require("file")
-    local log = require("log")
-
-    local bin_dir = file.join_path(install_path, "bin")
-    local home_dir = file.join_path(install_path, "home")
-    local download_dir = file.join_path(install_path, "download")
-
-    cmd.exec("mkdir -p " .. bin_dir .. " " .. home_dir .. " " .. download_dir)
-
+---@param version string The mise-provided install path
+---@param install_path string The mise-provided install path
+---@param _download_path string The mise-provided install path
+function M.install(version, install_path, _download_path)
     -- 1. Download the launcher executable
-    local exe_suffix = platform.get_exe_suffix()
-    local launcher_dest = file.join_path(bin_dir, "nrfutil" .. exe_suffix)
-    local launcher_url = M.get_nrfutil_url()
-    log.info("Downloading nrfutil launcher from " .. launcher_url)
-    local err = http.download_file({
-        url = launcher_url,
-        headers = { ["User-Agent"] = "mise-plugin" },
-    }, launcher_dest)
-    if err ~= nil then
-        error("Failed to download nrfutil launcher: " .. err)
+    local launcher_url = get_nrfutil_url()
+    Utils.inf("Downloading nrfutil launcher", { url = launcher_url })
+    local nrfutil_bin = Utils.net.executable_asset_download(launcher_url, install_path)
+    if nrfutil_bin == nil then
+        Utils.fatal("Failed to download nrfutil launcher")
     end
 
-    if platform.get_os() ~= "windows" then
-        cmd.exec("chmod +x " .. launcher_dest)
+    if sh.get_os() ~= "windows" then
+        sh.safe_exec("chmod +x " .. nrfutil_bin, { fail = true })
     end
 
-    -- 2. Download the versioned core module tarball
-    local tarball_url = M.get_tarball_url(version)
-    local triple = platform.get_platform_triple()
-    local tarball_name = "nrfutil-" .. triple .. "-" .. version .. ".tar.gz"
-    local tarball_path = file.join_path(download_dir, tarball_name)
-    log.info("Downloading nrfutil core " .. version .. " from " .. tarball_url)
-    err = http.download_file({
-        url = tarball_url,
-        headers = { ["User-Agent"] = "mise-plugin" },
-    }, tarball_path)
-    if err ~= nil then
-        error("Failed to download nrfutil core tarball: " .. err)
-    end
-
-    -- 3. Bootstrap: pin core version via tarball path, run nrfutil to trigger install
-    log.info("Bootstrapping nrfutil core " .. version)
-    cmd.exec(launcher_dest .. " --version", {
-        env = {
-            NRFUTIL_HOME = home_dir,
-            NRFUTIL_BOOTSTRAP_TARBALL_PATH = tarball_path,
-        },
-    })
-
-    -- 4. Configure the package index (needed for toolchain-manager later)
-    local idx_name = platform.PACKAGE_INDEX_NAME
-    local idx_url = platform.PACKAGE_INDEX_URL
-    pcall(cmd.exec, launcher_dest .. " config package-index remove " .. idx_name, { env = { NRFUTIL_HOME = home_dir } })
-    cmd.exec(
-        launcher_dest .. " config package-index add " .. idx_name .. " " .. idx_url,
-        { env = { NRFUTIL_HOME = home_dir } }
+    Utils.inf("Installing nrfutil toolchain-manager")
+    sh.safe_exec({ nrfutil_bin, "install ", "toolchain-manager" }, { fail = true })
+    Utils.inf("Configuring the NCS toolchain installation directory ")
+    sh.safe_exec(
+        { nrfutil_bin, "toolchain-manager", "config", "--set", "install-dir=" .. install_path },
+        { fail = true }
     )
 
-    log.info("nrfutil " .. version .. " installed successfully")
+    Utils.inf("Installing NCS toolchain", { version = version })
+    sh.safe_exec({
+        nrfutil_bin,
+        " toolchain-manager",
+        "install",
+        "--ncs-version",
+        "v" .. version,
+        "--install-dir",
+        install_path,
+    }, { fail = true })
+
+    Utils.inf("nrfutil installed successfully", { version = version })
 end
 
---- Returns environment variables for an installed nrfutil version.
----@param version string nrfutil version (unused, kept for API consistency)
----@param install_path string Installation directory
----@return table[] env_vars Array of {key, value} tables
-function M.exec_env(version, install_path) -- luacheck: no unused args
-    local file = require("file")
-    return {
-        { key = "PATH", value = file.join_path(install_path, "bin") },
-        { key = "NRFUTIL_HOME", value = file.join_path(install_path, "home") },
+---@param version string The mise-provided install path
+---@param install_path string The mise-provided install path
+---@return EnvKey[] env_vars Array of {key, value} tables
+function M.envs(version, install_path) -- luacheck: no unused args
+    local nrfutil_bin = Utils.fs.Path({ install_path, "bin" })
+    local nrfutil = Utils.fs.Path({ nrfutil_bin, "nrfutil" })
+
+    local env_vars = {
+        { key = "PATH", value = nrfutil_bin },
+        { key = "NRFUTIL_HOME", value = install_path },
     }
+    local output = sh.safe_exec({
+        nrfutil,
+        " toolchain-manager",
+        "env",
+        "--ncs-version",
+        "v" .. version,
+        "--install-dir",
+        install_path,
+        " --as-script",
+    }, { fail = true })
+
+    local lines = Utils.strings.split(output, "\n")
+    for _, line in ipairs(lines) do
+        local key, value = line:match('^export%s+([%w_]+)="?(.-)"?$')
+        if key and value then
+            if Utils.strings.has_prefix(key, "PYTHON") or Utils.strings.has_suffix(key, "PATH") then
+                Utils.inf("Ignoring env var", { key = key, value = value })
+            else
+                table.insert(env_vars, { key = key, value = value })
+            end
+        end
+    end
+
+    Utils.inf("Built env vars for NCS toolchain", { env = env_vars })
+    return env_vars
 end
 
 return M

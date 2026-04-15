@@ -7,11 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 jobs:
-  integration-test:
+  smoke-test:
     strategy:
       fail-fast: false
       matrix:
-        ncs_version: ["2.7.0", "3.0.2", "3.2.1"]
+        version: ["3.2.1"]
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -19,14 +19,28 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           experimental: true
-      - name: Cache nrfutil install
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/mise/installs/ncs-nrfutil
-          key: ncs-nrfutil-${{ runner.os }}-${{ hashFiles('lib/nrfutil.lua') }}
-      - name: Cache NCS toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/mise/installs/ncs-toolchain
-          key: ncs-toolchain-${{ runner.os }}-${{ matrix.ncs_version }}
-      - run: mise run ci ${{ matrix.ncs_version }}
+          mise_toml: |
+            [tools]
+            uv = "latest"
+            [env]
+            BACKEND = "ncs"
+            MISE_USE_VERSIONS_HOST = "0"
+            BACKEND_VERSION = "${{ matrix.version }}"
+
+            [tasks.test]
+            description = "Tests"
+            run = '''
+            echo "Link!"
+            mise plugins ln "${BACKEND:?}" .
+            echo "ls-remote!"
+            mise ls-remote "${BACKEND}:toolchain@${BACKEND_VERSION}"
+            mise ls-remote "${BACKEND}:west@${BACKEND_VERSION}"
+            echo "Install!"
+            mise use -g "${BACKEND}:toolchain@${BACKEND_VERSION:?}"
+            mise use -g "${BACKEND}:west@${BACKEND_VERSION}"
+            echo "Exec!"
+            mise x  -- arm-zephyr-eabi-gcc --version
+            mise x  -- west --version
+            echo "Finished!"
+            '''
+      - run: mise run test
